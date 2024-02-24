@@ -36,8 +36,7 @@ Array_head *array_append(Array_head *list, void *data) {
         return NULL;
     }
     if (list->count % MEMORY_BLOCK == 0) {
-        bool resize_result =
-            array_resize(list, list->count / MEMORY_BLOCK + 2);
+        bool resize_result = array_resize(list, list->count / MEMORY_BLOCK + 2);
         if (!resize_result) {
             return NULL;
         }
@@ -197,7 +196,9 @@ bool array_resize(Array_head *list, size_t size_new) {
         return false;
     }
     array_array_edit(list, pointer);
-    for (size_t i = list->count; i < size_new; i++) list->array[i] = 0;
+    for (size_t i = list->count * list->data_size;
+         i < size_new * list->data_size; i++)
+        list->array[i] = 0;
     return true;
 }
 inline void array_position_set(Array_head *list, size_t position, void *data) {
