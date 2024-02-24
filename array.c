@@ -1,16 +1,19 @@
-#include "dynamic_array.h"
+#include "array.h"
 
 #include <errno.h>
-
+#include <string.h>
 extern int errno;
 
 #define MEMORY_BLOCK 20
-
+void array_split_merge(Array_head *b, Array_head *a, size_t i_begin,
+                       size_t i_end, const Array_classify sort);
+void array_merge_down(Array_head *b, Array_head *a, size_t i_begin,
+                      size_t i_middle, size_t i_end, const Array_classify sort);
 void array_count_edit(Array_head *list, size_t count);
 void array_data_size_edit(Array_head *list, size_t data_size);
 void array_array_edit(Array_head *list, uint8_t *start);
 bool array_resize(Array_head *list, size_t size_new);
-void array_position_set(Array_head *list, size_t position, void *data);
+void array_position_set(Array_head *list, size_t position, const void *data);
 void array_position_get(Array_head *list, size_t position, void *data);
 
 Array_head *array_create(size_t data_size) {
@@ -30,7 +33,7 @@ Array_head *array_create(size_t data_size) {
     return array;
 }
 
-Array_head *array_append(Array_head *list, void *data) {
+Array_head *array_append(Array_head *list, const void *data) {
     if (list == NULL || data == NULL) {
         errno = EINVAL;
         return NULL;
@@ -46,11 +49,11 @@ Array_head *array_append(Array_head *list, void *data) {
     return list;
 }
 
-inline Array_head *array_push(Array_head *list, void *data) {
+inline Array_head *array_push(Array_head *list, const void *data) {
     return array_add_at(list, data, 0);
 }
 
-Array_head *array_add_at(Array_head *list, void *data, size_t position) {
+Array_head *array_add_at(Array_head *list, const void *data, size_t position) {
     if (list == NULL || data == NULL) {
         errno = EINVAL;
         return NULL;
@@ -72,12 +75,17 @@ Array_head *array_add_at(Array_head *list, void *data, size_t position) {
     array_count_edit(list, list->count + 1);
     return list;
 }
-bool array_get(Array_head *list, void *data, size_t position) {
-    if (list == NULL || data == NULL) {
+bool array_set(Array_head *list, const void *data, size_t position) {
+    if (list == NULL || data == NULL || position >= list->count) {
         errno = EINVAL;
         return false;
     }
-    if (position >= list->count) {
+    array_position_set(list, position, data);
+    return true;
+}
+
+bool array_get(Array_head *list, void *data, size_t position) {
+    if (list == NULL || data == NULL || position >= list->count) {
         errno = EINVAL;
         return false;
     }
@@ -155,12 +163,6 @@ Array_head *array_merge(Array_head *list1, Array_head *list2) {
     if (!(list1->count + list2->count)) {
         return list_result;
     }
-    // const size_t array_block_size =
-    //     (list1->count + list2->count) / MEMORY_BLOCK +
-    //     ((list1->count + list2->count) % MEMORY_BLOCK ? 1 : 0);
-    // if (!array_resize(list_result, array_block_size)) {
-    //     return NULL;
-    // }
     uint8_t *data = (uint8_t *)malloc(list_result->data_size);
     if (data == NULL) {
         errno = ENOMEM;
@@ -178,6 +180,75 @@ Array_head *array_merge(Array_head *list1, Array_head *list2) {
     return list_result;
 }
 
+long array_search(Array_head *list, const void *data, Array_classify search,
+                  Array_head **result) {
+    if (list == NULL || data == NULL || search == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (result != NULL) {
+        *result = array_create(sizeof(size_t));
+    }
+    for (size_t i = 0; i < list->count; i++) {
+        if (search(data, (void *)(list->array + i * list->data_size))) {
+            if (result == NULL) return (long)i;
+            array_push(*result, &i);
+        }
+    }
+    return -1;
+}
+
+Array_head *array_sort(Array_head *list, const Array_classify sort) {
+    if (list == NULL || sort == NULL) {
+        errno = EINVAL;
+        return NULL;
+    }
+    Array_head *b = array_create(list->data_size);
+    for (size_t i = 0; i < list->count; i++)
+        array_append(b, list->array + i * list->data_size);
+    array_split_merge(list, b, 0, list->count, sort);
+    array_delete(&b);
+    return list;
+}
+
+void array_split_merge(Array_head *b, Array_head *a, size_t i_begin,
+                       size_t i_end, const Array_classify sort) {
+    if (i_end - i_begin <= 1) {
+        return;
+    }
+    const size_t i_middle = (i_end + i_begin) / 2;
+    array_split_merge(a, b, i_begin, i_middle, sort);
+    array_split_merge(a, b, i_middle, i_end, sort);
+
+    array_merge_down(b, a, i_begin, i_middle, i_end, sort);
+}
+
+void array_merge_down(Array_head *b, Array_head *a, size_t i_begin,
+                      size_t i_middle, size_t i_end,
+                      const Array_classify sort) {
+    size_t i = i_begin;
+    size_t j = i_middle;
+    for (size_t k = i_begin; k < i_end; k++) {
+        if (i < i_middle && (j >= i_end || sort(a->array + i * a->data_size,
+                                                a->array + j * a->data_size))) {
+            array_position_set(b, k, a->array + i * a->data_size);
+            i++;
+        } else {
+            array_position_set(b, k, a->array + j * a->data_size);
+            j++;
+        }
+    }
+}
+
+bool array_delete(Array_head **list) {
+    if (list == NULL || *list == NULL) {
+        errno = EINVAL;
+        return false;
+    }
+    free((void *)(*list)->array);
+    free(*list);
+    return true;
+}
 inline void array_count_edit(Array_head *list, size_t count) {
     *(size_t *)(&list->count) = count;
 }
@@ -190,7 +261,7 @@ inline void array_array_edit(Array_head *list, uint8_t *start) {
 bool array_resize(Array_head *list, size_t size_new) {
     size_new *= MEMORY_BLOCK;
     uint8_t *pointer =
-        (uint8_t *)realloc(list->array, size_new * list->data_size);
+        (uint8_t *)realloc((void *)list->array, size_new * list->data_size);
     if (pointer == NULL) {
         errno = ENOMEM;
         return false;
@@ -198,16 +269,16 @@ bool array_resize(Array_head *list, size_t size_new) {
     array_array_edit(list, pointer);
     for (size_t i = list->count * list->data_size;
          i < size_new * list->data_size; i++)
-        list->array[i] = 0;
+        ((uint8_t *)(list->array))[i] = 0;
     return true;
 }
-inline void array_position_set(Array_head *list, size_t position, void *data) {
+inline void array_position_set(Array_head *list, size_t position,
+                               const void *data) {
     for (size_t i = 0; i < list->data_size; i++) {
-        list->array[position * list->data_size + i] = ((uint8_t *)data)[i];
+        ((uint8_t *)list->array)[position * list->data_size + i] =
+            ((const uint8_t *)data)[i];
     }
 }
 inline void array_position_get(Array_head *list, size_t position, void *data) {
-    for (size_t i = 0; i < list->data_size; i++) {
-        ((uint8_t *)data)[i] = list->array[position * list->data_size + i];
-    }
+    memcpy(data, &list->array[position * list->data_size], list->data_size);
 }
